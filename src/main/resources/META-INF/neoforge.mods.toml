@@ -1,0 +1,38 @@
+# Bedrock Line Placement — NeoForge mod metadata (Minecraft 1.21.1).
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "Apache-2.0"
+issueTrackerURL = "https://github.com/Jus144tice/bedrock-line-placement/issues"
+
+[[mods]]
+modId = "bedrocklineplacement"
+version = "1.1.0"
+displayName = "Bedrock Line Placement"
+authors = "Jus144tice"
+description = '''
+Client-side quality-of-life mod that recreates Bedrock Edition's straight-line block
+placement in Java Edition. While you hold the use/place key, placements lock to the
+first clear cardinal direction and sideways drift is suppressed. It only ever cancels
+vanilla placement attempts — it never places blocks for you and never adds reach,
+speed, or any non-vanilla packet, so it is safe to use on vanilla servers without any
+server-side installation.
+'''
+
+# The mixin that suppresses off-line placements. Client-only targets.
+[[mixins]]
+config = "bedrocklineplacement.mixins.json"
+
+# Requires NeoForge (client side only).
+[[dependencies.bedrocklineplacement]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.bedrocklineplacement]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1]"
+ordering = "NONE"
+side = "CLIENT"
