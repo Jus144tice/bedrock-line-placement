@@ -3,6 +3,28 @@
 All notable changes to **Bedrock Line Placement** are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-06-05
+
+### Added
+- **Line Reacharound** (`enableLineReacharound`, default `true`). While a line is
+  locked and you are holding the use key, the mod infers the **lead block** (the front
+  of the line) and continues the line from its **forward face** even when your crosshair
+  narrowly misses that face — useful for elevated bridges and long rows where you stand
+  on the line and walk forward. It is deliberately conservative:
+  - only runs during an **active line lock** while the use key is held;
+  - uses the **vanilla placement path** (synthesizes the interaction you would make by
+    aiming at the lead block's face) and respects vanilla **reach, collision, inventory,
+    and server validation** — no extra reach, no custom packets, never sets blocks
+    directly;
+  - is **rate-limited to vanilla's held-use cadence**, so it never places faster or more
+    than holding right-click would;
+  - tracks the lead block from **confirmed placements only**, and defers to vanilla if the
+    lead block is missing, unloaded, replaced, the next cell is occupied, or out of reach.
+  - Resets with the existing line state (use-key release, item/slot change, screen open,
+    dimension change, optional sneak, non-block held item).
+- Pure, Minecraft-free `LineDirection` (axis/sign → face + unit step) and `LinePolicy`
+  lead-block / direction / next-cell accessors, with unit tests.
+
 ## [1.1.0] - 2026-06-04
 
 ### Changed

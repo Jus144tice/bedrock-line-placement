@@ -8,16 +8,22 @@ import com.bedrockline.lineplacement.BedrockLinePlacement;
 import com.bedrockline.lineplacement.Config;
 import com.bedrockline.lineplacement.core.Decision;
 import com.bedrockline.lineplacement.core.GridPos;
+import com.bedrockline.lineplacement.core.LineDirection;
 import com.bedrockline.lineplacement.core.LinePolicy;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.Vec3i;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Client-side glue between Minecraft's placement code and the pure
@@ -33,6 +39,14 @@ public final class LineLockManager {
 
     public static final LineLockManager INSTANCE = new LineLockManager();
 
+    /**
+     * Ticks between reacharound placements, matching vanilla's held-use placement
+     * cadence ({@code Minecraft#rightClickDelay} is set to 4 while the use key is
+     * held). Every confirmed placement (normal or reacharound) re-arms this, so
+     * reacharound never outpaces vanilla continuous placement.
+     */
+    private static final int REACHAROUND_COOLDOWN_TICKS = 4;
+
     private final LinePolicy policy = new LinePolicy();
 
     /** Predicted placement position stashed between the HEAD and RETURN hooks. */
@@ -46,6 +60,13 @@ public final class LineLockManager {
      * back so the player has time to start moving in their intended direction.
      */
     private int pauseTicksRemaining;
+
+    /**
+     * Ticks until Line Reacharound may attempt another placement. Decremented each
+     * client tick; re-armed to {@link #REACHAROUND_COOLDOWN_TICKS} on every
+     * confirmed placement so the feature stays at or below vanilla's cadence.
+     */
+    private int reacharoundCooldown;
 
     private LineLockManager() {}
 
@@ -124,6 +145,10 @@ public final class LineLockManager {
             boolean wasLocked = policy.isLocked();
             policy.record(place, pendingAllowVertical);
 
+            // Re-arm the reacharound cadence on every confirmed placement (normal or
+            // reacharound), so reacharound never places faster than vanilla held-use.
+            reacharoundCooldown = REACHAROUND_COOLDOWN_TICKS;
+
             if (wasEmpty && policy.hasAnchor()) {
                 // This was the anchor (first block of a new line): start the settle pause.
                 pauseTicksRemaining = Config.firstPlacementPauseTicks();
@@ -136,10 +161,113 @@ public final class LineLockManager {
         }
     }
 
-    /** Advances the initial-pause countdown. Call once per client tick. */
+    /** Advances the initial-pause and reacharound-cadence countdowns. Call once per client tick. */
     public void clientTick() {
         if (pauseTicksRemaining > 0) {
             pauseTicksRemaining--;
+        }
+        if (reacharoundCooldown > 0) {
+            reacharoundCooldown--;
+        }
+    }
+
+    /**
+     * Line Reacharound: when a line is locked and the player is holding use but
+     * their crosshair is not landing the next block on the line, infer the lead
+     * block and continue the line from its forward face. Called once per client
+     * tick (after the reset checks) from {@link ClientEvents}.
+     *
+     * <p>This never bypasses vanilla: it synthesizes the exact {@link BlockHitResult}
+     * the player would produce by aiming at the lead block's forward face and routes
+     * it through the normal {@code useItemOn} path (which re-enters this class's own
+     * mixin, so the policy still decides and records). Reach, collision, inventory
+     * and server validation are all unchanged. It is strictly cadence-limited to
+     * vanilla's held-use rate and only ever attempts a single placement per tick.</p>
+     *
+     * <p>It does nothing — deferring to vanilla — when reacharound or line placement
+     * is disabled, no line is locked, the settle pause is active, the use key is not
+     * held, no block item is held, the lead block is missing/unloaded, the next cell
+     * is not replaceable, the lead face is out of reach, or the player's own crosshair
+     * is already aimed to place the next block.</p>
+     */
+    public void tryReacharound() {
+        if (reacharoundCooldown > 0) {
+            return; // cadence-limited (decremented in clientTick)
+        }
+        if (!Config.enableLinePlacement() || !Config.enableLineReacharound()) {
+            return;
+        }
+        if (!policy.isLocked() || pauseTicksRemaining > 0) {
+            return;
+        }
+
+        Minecraft mc = Minecraft.getInstance();
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null || mc.gameMode == null) {
+            return;
+        }
+        // Reacharound is a "keep holding use to continue the line" feature.
+        if (!mc.options.keyUse.isDown()) {
+            return;
+        }
+
+        // Only ever synthesize a *block* placement, for a hand holding a block item.
+        InteractionHand hand = blockHand(player);
+        if (hand == null) {
+            return;
+        }
+
+        GridPos leadGrid = policy.leadBlock();
+        GridPos nextGrid = policy.reacharoundNext();
+        LineDirection dir = policy.direction();
+        if (leadGrid == null || nextGrid == null || dir == null) {
+            return;
+        }
+
+        Level level = player.level();
+        BlockPos lead = new BlockPos(leadGrid.x(), leadGrid.y(), leadGrid.z());
+        BlockPos next = new BlockPos(nextGrid.x(), nextGrid.y(), nextGrid.z());
+
+        // The world must back the inferred line: a solid lead block to click against and
+        // a replaceable cell ahead of it. If the lead is gone (mined / replaced / not
+        // loaded), do nothing and let vanilla behaviour take over.
+        if (!level.isLoaded(lead) || !level.isLoaded(next)) {
+            return;
+        }
+        if (level.getBlockState(lead).isAir()) {
+            debug("reacharound skip: lead block missing at " + leadGrid);
+            return;
+        }
+        if (!level.getBlockState(next).canBeReplaced()) {
+            return; // next cell already occupied
+        }
+
+        // If the player's own crosshair is already lined up to place the next block,
+        // let vanilla do it — never double up.
+        if (vanillaWouldPlaceAt(player, hand, nextGrid)) {
+            return;
+        }
+
+        Direction face = Direction.valueOf(dir.name());
+        Vec3i normal = face.getNormal();
+        Vec3 faceCenter = Vec3.atCenterOf(lead).add(normal.getX() * 0.5, normal.getY() * 0.5, normal.getZ() * 0.5);
+
+        // Respect vanilla block-interaction reach; never extend it.
+        double reach = player.blockInteractionRange();
+        if (player.getEyePosition().distanceToSqr(faceCenter) > reach * reach) {
+            return;
+        }
+
+        // Synthesize the interaction the player would make by aiming at the lead block's
+        // forward face. This routes through our useItemOn mixin: the policy sees the
+        // next (on-line, contiguous) position, allows it, and records it on RETURN —
+        // advancing the lead exactly like a normal placement. Vanilla/the server still
+        // decide whether the placement actually happens.
+        BlockHitResult hit = new BlockHitResult(faceCenter, face, lead, false);
+        InteractionResult result = mc.gameMode.useItemOn(player, hand, hit);
+        if (result != null && result.consumesAction()) {
+            player.swing(hand); // arm-swing feedback; postUseItemOn already re-armed the cooldown
+            debug("reacharound placed at " + nextGrid + " against " + face + " face of " + leadGrid);
         }
     }
 
@@ -151,10 +279,41 @@ public final class LineLockManager {
         policy.reset();
         pendingPlacePos = null;
         pauseTicksRemaining = 0;
+        reacharoundCooldown = 0;
     }
 
     public boolean isLocked() {
         return policy.isLocked();
+    }
+
+    /** The hand holding a {@link BlockItem} (main preferred), or {@code null} if neither does. */
+    private static InteractionHand blockHand(LocalPlayer player) {
+        if (player.getMainHandItem().getItem() instanceof BlockItem) {
+            return InteractionHand.MAIN_HAND;
+        }
+        if (player.getOffhandItem().getItem() instanceof BlockItem) {
+            return InteractionHand.OFF_HAND;
+        }
+        return null;
+    }
+
+    /**
+     * True if the player's current crosshair target would itself place a block at
+     * {@code target} (using vanilla's own {@link BlockPlaceContext} prediction). When
+     * so, reacharound stands down and lets the normal placement path handle it.
+     */
+    private static boolean vanillaWouldPlaceAt(LocalPlayer player, InteractionHand hand, GridPos target) {
+        HitResult hr = Minecraft.getInstance().hitResult;
+        if (!(hr instanceof BlockHitResult blockHit) || blockHit.getType() != HitResult.Type.BLOCK) {
+            return false;
+        }
+        try {
+            BlockPlaceContext ctx = new BlockPlaceContext(player, hand, player.getItemInHand(hand), blockHit);
+            BlockPos pos = ctx.getClickedPos();
+            return pos.getX() == target.x() && pos.getY() == target.y() && pos.getZ() == target.z();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private static void debug(String message) {

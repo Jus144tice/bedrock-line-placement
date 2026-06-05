@@ -89,6 +89,12 @@ public final class ClientEvents {
             LineLockManager.INSTANCE.reset("dimension changed");
         }
         lastDimension = dimension;
+
+        // After all reset triggers: if a line is still locked and the player is holding
+        // use, let Line Reacharound continue the line from the lead block's forward face
+        // (no-op unless the feature is enabled and all its guards pass). Running last
+        // means a lock cleared this tick will not reacharound.
+        LineLockManager.INSTANCE.tryReacharound();
     }
 
     private static void resetTrackers() {

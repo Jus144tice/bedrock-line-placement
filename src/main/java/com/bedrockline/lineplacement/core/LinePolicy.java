@@ -92,6 +92,58 @@ public final class LinePolicy {
         return prev;
     }
 
+    // ---- line geometry (for Line Reacharound) ----------------------------
+
+    /**
+     * The locked direction as a {@link LineDirection} (axis + sign + unit step),
+     * or {@code null} when not locked.
+     */
+    public LineDirection direction() {
+        return axis == null ? null : LineDirection.of(axis, sign);
+    }
+
+    /**
+     * The current <b>lead block</b>: the full grid position of the tip of the
+     * contiguous run (the last block confirmed on the line). It shares
+     * {@link #lineRef}'s two off-axis coordinates and sits at {@link #frontier}
+     * along the locked axis. {@code null} when not locked.
+     *
+     * <p>Because {@link #frontier} only advances on a confirmed (consuming)
+     * placement, this is a conservative, "known-placed" position — it never runs
+     * ahead of a placement the client actually saw succeed.</p>
+     */
+    public GridPos leadBlock() {
+        if (axis == null) {
+            return null;
+        }
+        return withAxisCoord(lineRef, axis, frontier);
+    }
+
+    /**
+     * The next block position along the locked line, one step past the lead block
+     * in the locked direction — i.e. where Line Reacharound would continue the
+     * line. {@code null} when not locked.
+     */
+    public GridPos reacharoundNext() {
+        if (axis == null) {
+            return null;
+        }
+        return leadBlock().plus(direction().step());
+    }
+
+    /**
+     * Convenience gate for the reacharound feature: the {@link #reacharoundNext()}
+     * position when {@code reacharoundEnabled} is true <em>and</em> a line is
+     * locked, otherwise {@code null}. Keeps the "disabled / no lock ⇒ do nothing"
+     * rule unit-testable without any Minecraft types.
+     */
+    public GridPos reacharoundTarget(boolean reacharoundEnabled) {
+        if (!reacharoundEnabled) {
+            return null;
+        }
+        return reacharoundNext();
+    }
+
     // ---- core decision ---------------------------------------------------
 
     /**
@@ -199,6 +251,15 @@ public final class LinePolicy {
             return LockAxis.Y;
         }
         return LockAxis.Z;
+    }
+
+    /** {@code base} with its coordinate along {@code axis} replaced by {@code coord}. */
+    private static GridPos withAxisCoord(GridPos base, LockAxis axis, int coord) {
+        return switch (axis) {
+            case X -> new GridPos(coord, base.y(), base.z());
+            case Y -> new GridPos(base.x(), coord, base.z());
+            case Z -> new GridPos(base.x(), base.y(), coord);
+        };
     }
 
     /** True if {@code a} and {@code b} agree on the two coordinates that are not {@code axis}. */

@@ -18,4 +18,9 @@ public record GridPos(int x, int y, int z) {
     public GridPos minus(GridPos other) {
         return new GridPos(x - other.x, y - other.y, z - other.z);
     }
+
+    /** Component-wise addition: {@code this + other}. Used to step to the next block on a line. */
+    public GridPos plus(GridPos other) {
+        return new GridPos(x + other.x, y + other.y, z + other.z);
+    }
 }

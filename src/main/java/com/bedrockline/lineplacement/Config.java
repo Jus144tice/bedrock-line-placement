@@ -35,6 +35,15 @@ public final class Config {
                     "Allow locking onto the vertical (Y) axis for towers/pillars.")
             .define("allowVerticalLocking", true);
 
+    public static final ModConfigSpec.BooleanValue ENABLE_LINE_REACHAROUND = BUILDER.comment(
+                    "Line Reacharound: while a line lock is active, continue the line from the lead",
+                    "block's forward face even when your crosshair narrowly misses it (e.g. building an",
+                    "elevated bridge while standing on top of the line and walking forward). Only ever",
+                    "runs during an active line lock; it still uses vanilla placement, reach, collision",
+                    "and server validation, and never auto-builds beyond what holding the use key would.",
+                    "Set false to require directly hitting the lead block face.")
+            .define("enableLineReacharound", true);
+
     public static final ModConfigSpec.IntValue FIRST_PLACEMENT_PAUSE_TICKS = BUILDER.comment(
                     "Bedrock-style pause (in ticks, 20 = 1 second) after the FIRST block of a",
                     "line before the second block is allowed. This gives you a moment to start",
@@ -80,6 +89,10 @@ public final class Config {
 
     public static boolean allowVerticalLocking() {
         return safeGet(ALLOW_VERTICAL_LOCKING, true);
+    }
+
+    public static boolean enableLineReacharound() {
+        return safeGet(ENABLE_LINE_REACHAROUND, true);
     }
 
     public static int firstPlacementPauseTicks() {

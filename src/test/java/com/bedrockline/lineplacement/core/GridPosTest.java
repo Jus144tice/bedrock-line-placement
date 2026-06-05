@@ -42,6 +42,29 @@ class GridPosTest {
     }
 
     @Test
+    void plusIsComponentWiseAddition() {
+        GridPos a = new GridPos(1, 2, 3);
+        GridPos b = new GridPos(4, 5, 6);
+        assertEquals(new GridPos(5, 7, 9), a.plus(b));
+    }
+
+    @Test
+    void plusWithAUnitStepWalksToTheNextBlock() {
+        // How Line Reacharound advances: lead + direction step = next block.
+        GridPos lead = new GridPos(10, 64, 0);
+        assertEquals(new GridPos(11, 64, 0), lead.plus(new GridPos(1, 0, 0))); // +X / east
+        assertEquals(new GridPos(10, 65, 0), lead.plus(new GridPos(0, 1, 0))); // +Y / up
+        assertEquals(new GridPos(10, 64, -1), lead.plus(new GridPos(0, 0, -1))); // -Z / north
+    }
+
+    @Test
+    void plusAndMinusAreInverse() {
+        GridPos a = new GridPos(7, -3, 2);
+        GridPos d = new GridPos(1, 0, -1);
+        assertEquals(a, a.plus(d).minus(d));
+    }
+
+    @Test
     void valueEqualityAndHashing() {
         // Records give value semantics, which LinePolicy relies on (e.g. pos.equals(prev)).
         assertEquals(new GridPos(1, 2, 3), new GridPos(1, 2, 3));

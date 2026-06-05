@@ -35,6 +35,7 @@ class ConfigTest {
         assertEquals(List.of("enableForBlocksOnly"), Config.ENABLE_FOR_BLOCKS_ONLY.getPath());
         assertEquals(List.of("requireContinuousUseKey"), Config.REQUIRE_CONTINUOUS_USE_KEY.getPath());
         assertEquals(List.of("allowVerticalLocking"), Config.ALLOW_VERTICAL_LOCKING.getPath());
+        assertEquals(List.of("enableLineReacharound"), Config.ENABLE_LINE_REACHAROUND.getPath());
         assertEquals(List.of("firstPlacementPauseTicks"), Config.FIRST_PLACEMENT_PAUSE_TICKS.getPath());
         assertEquals(List.of("resetOnItemChange"), Config.RESET_ON_ITEM_CHANGE.getPath());
         assertEquals(List.of("resetOnSneak"), Config.RESET_ON_SNEAK.getPath());
@@ -48,6 +49,7 @@ class ConfigTest {
         assertTrue(Config.ENABLE_FOR_BLOCKS_ONLY.getDefault());
         assertTrue(Config.REQUIRE_CONTINUOUS_USE_KEY.getDefault());
         assertTrue(Config.ALLOW_VERTICAL_LOCKING.getDefault());
+        assertTrue(Config.ENABLE_LINE_REACHAROUND.getDefault());
         assertEquals(6, Config.FIRST_PLACEMENT_PAUSE_TICKS.getDefault());
         assertTrue(Config.RESET_ON_ITEM_CHANGE.getDefault());
         assertFalse(Config.RESET_ON_SNEAK.getDefault());
@@ -63,6 +65,7 @@ class ConfigTest {
         assertTrue(Config.enableForBlocksOnly());
         assertTrue(Config.requireContinuousUseKey());
         assertTrue(Config.allowVerticalLocking());
+        assertTrue(Config.enableLineReacharound());
         assertEquals(6, Config.firstPlacementPauseTicks());
         assertTrue(Config.resetOnItemChange());
         assertFalse(Config.resetOnSneak());
@@ -76,6 +79,7 @@ class ConfigTest {
         assertEquals(Config.ENABLE_FOR_BLOCKS_ONLY.getDefault(), Config.enableForBlocksOnly());
         assertEquals(Config.REQUIRE_CONTINUOUS_USE_KEY.getDefault(), Config.requireContinuousUseKey());
         assertEquals(Config.ALLOW_VERTICAL_LOCKING.getDefault(), Config.allowVerticalLocking());
+        assertEquals(Config.ENABLE_LINE_REACHAROUND.getDefault(), Config.enableLineReacharound());
         assertEquals(Config.FIRST_PLACEMENT_PAUSE_TICKS.getDefault(), Config.firstPlacementPauseTicks());
         assertEquals(Config.RESET_ON_ITEM_CHANGE.getDefault(), Config.resetOnItemChange());
         assertEquals(Config.RESET_ON_SNEAK.getDefault(), Config.resetOnSneak());

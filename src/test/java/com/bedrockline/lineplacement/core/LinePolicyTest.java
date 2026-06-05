@@ -342,4 +342,124 @@ class LinePolicyTest {
         assertEquals(at(2, 64, 0), p.lineRef()); // lineRef is fixed
         assertEquals(4, p.frontier()); // frontier follows the tip
     }
+
+    // ---- Line Reacharound geometry (lead block / direction / next) -------
+    //
+    // These cover the pure, Minecraft-free half of Line Reacharound: which block is
+    // the lead, which face/direction the line advances along, and where the next
+    // block goes. The world-dependent guards (lead block missing/unloaded, next not
+    // replaceable, lead face out of reach, "vanilla would already place it") live in
+    // LineLockManager and need in-game testing — they cannot be exercised here.
+
+    @Test
+    void reacharoundDoesNothingWhenDisabled() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(0, 64, 0), VERTICAL_ON);
+        place(p, at(1, 64, 0), VERTICAL_ON); // lock +X
+        assertTrue(p.isLocked());
+        // Even with a live lock, the disabled gate returns no target.
+        assertNull(p.reacharoundTarget(false));
+    }
+
+    @Test
+    void reacharoundDoesNothingWithoutALock() {
+        LinePolicy p = new LinePolicy();
+        // Empty: nothing to continue.
+        assertNull(p.leadBlock());
+        assertNull(p.direction());
+        assertNull(p.reacharoundNext());
+        assertNull(p.reacharoundTarget(true));
+
+        // Anchored but not yet locked: still nothing (no direction known).
+        place(p, at(5, 64, 5), VERTICAL_ON);
+        assertFalse(p.isLocked());
+        assertNull(p.leadBlock());
+        assertNull(p.direction());
+        assertNull(p.reacharoundNext());
+        assertNull(p.reacharoundTarget(true));
+    }
+
+    @Test
+    void reacharoundOnXLockComputesEastFaceAndNext() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(0, 64, 0), VERTICAL_ON);
+        place(p, at(1, 64, 0), VERTICAL_ON); // lock +X, lead at x=1
+
+        assertEquals(LineDirection.EAST, p.direction());
+        assertEquals(at(1, 64, 0), p.leadBlock());
+        assertEquals(at(2, 64, 0), p.reacharoundNext());
+        assertEquals(at(2, 64, 0), p.reacharoundTarget(true));
+
+        // The reacharound target is exactly the allowed contiguous next cell (on-line).
+        assertEquals(Decision.ALLOW, p.decide(p.reacharoundNext()));
+
+        // After the line extends, the lead and next advance with it.
+        place(p, at(2, 64, 0), VERTICAL_ON);
+        assertEquals(at(2, 64, 0), p.leadBlock());
+        assertEquals(at(3, 64, 0), p.reacharoundNext());
+    }
+
+    @Test
+    void reacharoundOnNegativeXComputesWestFaceAndNext() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(0, 64, 0), VERTICAL_ON);
+        place(p, at(-1, 64, 0), VERTICAL_ON); // lock -X, lead at x=-1
+
+        assertEquals(LineDirection.WEST, p.direction());
+        assertEquals(at(-1, 64, 0), p.leadBlock());
+        assertEquals(at(-2, 64, 0), p.reacharoundNext());
+    }
+
+    @Test
+    void reacharoundOnZLockComputesSouthFaceAndNext() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(10, 70, 10), VERTICAL_ON);
+        place(p, at(10, 70, 11), VERTICAL_ON); // lock +Z, lead at z=11
+
+        assertEquals(LineDirection.SOUTH, p.direction());
+        assertEquals(at(10, 70, 11), p.leadBlock());
+        assertEquals(at(10, 70, 12), p.reacharoundNext());
+        assertEquals(Decision.ALLOW, p.decide(p.reacharoundNext()));
+    }
+
+    @Test
+    void reacharoundOnYLockComputesUpFaceAndNextWhenVerticalEnabled() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(0, 64, 0), VERTICAL_ON);
+        place(p, at(0, 65, 0), VERTICAL_ON); // lock +Y, lead at y=65
+
+        assertEquals(LineDirection.UP, p.direction());
+        assertEquals(at(0, 65, 0), p.leadBlock());
+        assertEquals(at(0, 66, 0), p.reacharoundNext());
+        assertEquals(Decision.ALLOW, p.decide(p.reacharoundNext()));
+    }
+
+    @Test
+    void reacharoundNextStaysOnTheLockedLine() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(4, 64, -2), VERTICAL_ON);
+        place(p, at(5, 64, -2), VERTICAL_ON); // lock +X through (y=64, z=-2)
+
+        GridPos next = p.reacharoundNext();
+        // The two off-axis coordinates match the line; only X advances.
+        assertEquals(64, next.y());
+        assertEquals(-2, next.z());
+        assertEquals(6, next.x());
+        // An off-line position is therefore never the reacharound target.
+        assertEquals(Decision.SUPPRESS, p.decide(at(6, 65, -2)));
+    }
+
+    @Test
+    void resetClearsReacharoundState() {
+        LinePolicy p = new LinePolicy();
+        place(p, at(0, 64, 0), VERTICAL_ON);
+        place(p, at(1, 64, 0), VERTICAL_ON); // lock +X
+        assertEquals(at(2, 64, 0), p.reacharoundNext());
+
+        p.reset();
+        assertNull(p.leadBlock());
+        assertNull(p.direction());
+        assertNull(p.reacharoundNext());
+        assertNull(p.reacharoundTarget(true));
+    }
 }

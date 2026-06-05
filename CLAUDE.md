@@ -11,9 +11,17 @@ A **client-side, NeoForge, Minecraft 1.21.1** quality-of-life mod that recreates
 holds the use/place key, placements lock to the first clear cardinal direction and
 off-line / non-contiguous attempts are **suppressed**. It is a pure *gatekeeper*:
 
-- It **never places blocks itself** and never adds reach, speed, or any non-vanilla
-  packet. It only decides ALLOW vs SUPPRESS for the placement the player is already
+- It never adds reach, speed, or any non-vanilla packet. Its primary mode is a pure
+  *gatekeeper*: it decides ALLOW vs SUPPRESS for the placement the player is already
   attempting, by hooking the client's own placement method.
+- One opt-in helper, **Line Reacharound** (`enableLineReacharound`, default true), goes
+  slightly further: while a line is *already locked* and the use key is *held*, it
+  **redirects** the placement to the lead block's forward face by synthesizing the exact
+  `useItemOn` the player would make if their crosshair hit that face (routed through the
+  same vanilla path + this mod's own mixin). It still uses only vanilla placement, respects
+  vanilla reach/collision/inventory/server rules, sends no custom packet, never sets blocks
+  directly, and is rate-limited to vanilla's held-use cadence. It is **not** automation —
+  it only ever continues a line you are actively building by holding use.
 - Therefore it is **vanilla-server-safe** and needs no server-side install.
 - It is **not** a scaffold / printer / schematic / automation mod.
 
@@ -62,19 +70,35 @@ right-click held
                                               → arm initial pause on the anchor
 
 every client tick
-  → ClientEvents.onClientTickPost           → LineLockManager.clientTick()   (count down pause)
+  → ClientEvents.onClientTickPost           → LineLockManager.clientTick()   (count down pause + reacharound cooldown)
                                               → LineLockManager.reset(reason) on any reset trigger
+                                              → LineLockManager.tryReacharound()   (LAST, after resets)
+        guards (reacharound+line enabled? locked? not paused? cooldown elapsed? use held? BlockItem hand?)
+        → leadBlock = policy.leadBlock(); next = policy.reacharoundNext(); face = policy.direction()
+        → world checks (lead loaded+solid, next loaded+replaceable, lead face within reach)
+        → skip if vanilla crosshair would already place at next  (no double-up)
+        → synthesize BlockHitResult on lead's forward face → mc.gameMode.useItemOn(...)
+            (re-enters the mixin HEAD/RETURN above ⇒ policy decides ALLOW + records ⇒ lead advances)
 ```
 
 **Key invariants** (do not break without updating tests + this file):
 
-- The mod only ever **cancels**; it never synthesizes a placement. Suppression =
-  returning a non-consuming `InteractionResult` from the HEAD hook.
+- In gatekeeper mode the mod only **cancels** (suppression = a non-consuming
+  `InteractionResult` from the HEAD hook). The **one** exception is `tryReacharound`,
+  which *initiates* a placement — but only by calling the vanilla `useItemOn` path with a
+  synthesized hit on an already-locked line while use is held; it sends no custom packet
+  and adds no reach. Reacharound placements flow back through the same HEAD/RETURN hooks,
+  so the policy still decides + records them.
 - The pure policy never imports a Minecraft class. Conversions
-  (`BlockPos`→`GridPos`, config reads) happen only in `LineLockManager`.
+  (`BlockPos`→`GridPos`, config reads, `LineDirection`→`net.minecraft.core.Direction` by
+  name) happen only in `LineLockManager`.
 - Suppression only ever happens once a line is **locked** (or during the initial
-  pause); when unlocked the policy returns ALLOW so vanilla is untouched.
-- Locked lines are **contiguous**: only `frontier + sign` is allowed (see policy).
+  pause); when unlocked the policy returns ALLOW so vanilla is untouched. Reacharound
+  likewise only runs once **locked**.
+- Locked lines are **contiguous**: only `frontier + sign` is allowed (see policy). The
+  reacharound target is exactly that cell (`leadBlock + direction.step()`).
+- The **lead block** is derived from `frontier`, which only advances on a *confirmed*
+  (consuming) placement — so reacharound never assumes a failed attempt succeeded.
 
 ---
 
@@ -86,17 +110,18 @@ Paths are links; the `Symbols` column lists the anchors to grep for.
 
 | File | Symbols | Purpose |
 |---|---|---|
-| [GridPos.java](src/main/java/com/bedrockline/lineplacement/core/GridPos.java) | `GridPos` (record `x,y,z`), `GridPos.minus(GridPos)` | Minecraft-free integer block position used by the policy. |
+| [GridPos.java](src/main/java/com/bedrockline/lineplacement/core/GridPos.java) | `GridPos` (record `x,y,z`), `GridPos.minus(GridPos)`, `GridPos.plus(GridPos)` | Minecraft-free integer block position used by the policy. `plus` steps to the next block on a line. |
 | [LockAxis.java](src/main/java/com/bedrockline/lineplacement/core/LockAxis.java) | `LockAxis` (`X,Y,Z`), `LockAxis.of(GridPos)` | The cardinal axis a line locks to; `of` reads the coord on that axis. |
+| [LineDirection.java](src/main/java/com/bedrockline/lineplacement/core/LineDirection.java) | `LineDirection` (`EAST,WEST,UP,DOWN,SOUTH,NORTH`), `of(LockAxis,int sign)`, `step()`, `axis()`, `sign()` | Pure axis+sign → face + unit step for Line Reacharound. Constant names match `net.minecraft.core.Direction` so the client maps by name. |
 | [Decision.java](src/main/java/com/bedrockline/lineplacement/core/Decision.java) | `Decision` (`ALLOW`, `SUPPRESS`) | Result of a policy query. |
-| [LinePolicy.java](src/main/java/com/bedrockline/lineplacement/core/LinePolicy.java) | fields `prev`, `lineRef`, `axis`, `sign`, `frontier`; `decide(GridPos)`, `record(GridPos,boolean)`, `reset()`, `unitCardinal(GridPos,boolean)`, `offAxisMatches(...)`; queries `isLocked()`, `hasAnchor()`, `isActive()`, `frontier()` | **The brain.** State machine Empty→Anchored→Locked. `decide` = ALLOW unless locked, then require on-line AND exactly `frontier+sign` (contiguity). `record` establishes the lock on a unit cardinal step and advances `frontier`. |
+| [LinePolicy.java](src/main/java/com/bedrockline/lineplacement/core/LinePolicy.java) | fields `prev`, `lineRef`, `axis`, `sign`, `frontier`; `decide(GridPos)`, `record(GridPos,boolean)`, `reset()`, `unitCardinal(GridPos,boolean)`, `offAxisMatches(...)`, `withAxisCoord(...)`; queries `isLocked()`, `hasAnchor()`, `isActive()`, `frontier()`; reacharound geometry `direction()`, `leadBlock()`, `reacharoundNext()`, `reacharoundTarget(boolean)` | **The brain.** State machine Empty→Anchored→Locked. `decide` = ALLOW unless locked, then require on-line AND exactly `frontier+sign` (contiguity). `record` establishes the lock on a unit cardinal step and advances `frontier`. The reacharound accessors derive the lead block / direction / next cell from `lineRef`+`frontier`+`sign` (null unless locked). |
 
 ### Client glue — `com.bedrockline.lineplacement.client`
 
 | File | Symbols | Purpose |
 |---|---|---|
-| [LineLockManager.java](src/main/java/com/bedrockline/lineplacement/client/LineLockManager.java) | `INSTANCE` (singleton); `preUseItemOn(LocalPlayer,InteractionHand,BlockHitResult)`, `postUseItemOn(InteractionResult)`, `clientTick()`, `reset(String)`, `isLocked()`; fields `pendingPlacePos`, `pendingAllowVertical`, `pauseTicksRemaining` | Bridges Minecraft↔policy. Predicts placement pos via `BlockPlaceContext.getClickedPos()`, applies guards + the initial-pause gate, calls `decide`/`record`, owns the pause countdown. All `debug(...)` logging is gated by `Config.debugLogging()`. |
-| [ClientEvents.java](src/main/java/com/bedrockline/lineplacement/client/ClientEvents.java) | `onClientTickPost(ClientTickEvent.Post)`, `resetTrackers()`; trackers `wasUseDown`, `hadScreen`, `lastSlot`, `lastItem`, `wasSneaking`, `lastDimension` | Per-tick watcher. Calls `clientTick()` then fires `reset(reason)` on: no player, screen opened, use-key released, item/slot change, non-block held item, sneak toggle, dimension change. |
+| [LineLockManager.java](src/main/java/com/bedrockline/lineplacement/client/LineLockManager.java) | `INSTANCE` (singleton); `preUseItemOn(...)`, `postUseItemOn(InteractionResult)`, `clientTick()`, `tryReacharound()`, `reset(String)`, `isLocked()`; helpers `blockHand(LocalPlayer)`, `vanillaWouldPlaceAt(...)`; fields `pendingPlacePos`, `pendingAllowVertical`, `pauseTicksRemaining`, `reacharoundCooldown`; const `REACHAROUND_COOLDOWN_TICKS` (4) | Bridges Minecraft↔policy. Predicts placement pos via `BlockPlaceContext.getClickedPos()`, applies guards + the initial-pause gate, calls `decide`/`record`, owns the pause + reacharound-cooldown countdowns. `tryReacharound` synthesizes a `BlockHitResult` on the lead block's forward face and calls `mc.gameMode.useItemOn(...)`; `postUseItemOn` re-arms `reacharoundCooldown` on every confirmed placement so reacharound stays ≤ vanilla cadence. All `debug(...)` logging is gated by `Config.debugLogging()`. |
+| [ClientEvents.java](src/main/java/com/bedrockline/lineplacement/client/ClientEvents.java) | `onClientTickPost(ClientTickEvent.Post)`, `resetTrackers()`; trackers `wasUseDown`, `hadScreen`, `lastSlot`, `lastItem`, `wasSneaking`, `lastDimension` | Per-tick watcher. Calls `clientTick()`, fires `reset(reason)` on: no player, screen opened, use-key released, item/slot change, non-block held item, sneak toggle, dimension change — then calls `tryReacharound()` **last** (so a lock cleared this tick does not reacharound). |
 
 ### Mixin (the only vanilla hook) — `com.bedrockline.lineplacement.mixin`
 
@@ -109,7 +134,7 @@ Paths are links; the `Symbols` column lists the anchors to grep for.
 | File | Symbols | Purpose |
 |---|---|---|
 | [BedrockLinePlacement.java](src/main/java/com/bedrockline/lineplacement/BedrockLinePlacement.java) | `MODID` (`"bedrocklineplacement"`), `LOGGER`, constructor `BedrockLinePlacement(IEventBus,ModContainer)` | `@Mod(dist = Dist.CLIENT)` entrypoint. Registers the CLIENT config and `ClientEvents` on `NeoForge.EVENT_BUS`. |
-| [Config.java](src/main/java/com/bedrockline/lineplacement/Config.java) | `SPEC`; values `ENABLE_LINE_PLACEMENT`, `ENABLE_FOR_BLOCKS_ONLY`, `REQUIRE_CONTINUOUS_USE_KEY`, `ALLOW_VERTICAL_LOCKING`, `FIRST_PLACEMENT_PAUSE_TICKS`, `RESET_ON_ITEM_CHANGE`, `RESET_ON_SNEAK`, `DEBUG_LOGGING`; matching getters | `ModConfigSpec` for `config/bedrocklineplacement-client.toml`. Getters are null-safe (return defaults if queried before load). |
+| [Config.java](src/main/java/com/bedrockline/lineplacement/Config.java) | `SPEC`; values `ENABLE_LINE_PLACEMENT`, `ENABLE_FOR_BLOCKS_ONLY`, `REQUIRE_CONTINUOUS_USE_KEY`, `ALLOW_VERTICAL_LOCKING`, `ENABLE_LINE_REACHAROUND`, `FIRST_PLACEMENT_PAUSE_TICKS`, `RESET_ON_ITEM_CHANGE`, `RESET_ON_SNEAK`, `DEBUG_LOGGING`; matching getters | `ModConfigSpec` for `config/bedrocklineplacement-client.toml`. Getters are null-safe (return defaults if queried before load). |
 
 ### Resources — `src/main/resources`
 
@@ -126,8 +151,9 @@ Tests run via the moddev `unitTest` harness (NeoForge on the test classpath), so
 
 | File | Symbols | Purpose |
 |---|---|---|
-| [LinePolicyTest.java](src/test/java/com/bedrockline/lineplacement/core/LinePolicyTest.java) | helper `place(LinePolicy,GridPos,boolean)`; X/Y/Z + negative-direction locks, contiguity (`requiresContiguousPlacementNoGaps`), gapped/diagonal non-lock, vertical-disabled edge cases, `record()` corner cases (re-click anchor, off-line/gapped record doesn't advance frontier), query accessors, reset | Pure tests for `LinePolicy` (no Minecraft bootstrap). **Update these whenever the decision rules change.** |
-| [GridPosTest.java](src/test/java/com/bedrockline/lineplacement/core/GridPosTest.java) | components, `minus`, value equality/hashing | Pure tests for the `GridPos` record. |
+| [LinePolicyTest.java](src/test/java/com/bedrockline/lineplacement/core/LinePolicyTest.java) | helper `place(LinePolicy,GridPos,boolean)`; X/Y/Z + negative-direction locks, contiguity (`requiresContiguousPlacementNoGaps`), gapped/diagonal non-lock, vertical-disabled edge cases, `record()` corner cases (re-click anchor, off-line/gapped record doesn't advance frontier), query accessors, reset, **Line Reacharound geometry** (disabled/no-lock ⇒ null, X/Z/Y lead+direction+next, next stays on-line, reset clears) | Pure tests for `LinePolicy` (no Minecraft bootstrap). **Update these whenever the decision rules change.** |
+| [GridPosTest.java](src/test/java/com/bedrockline/lineplacement/core/GridPosTest.java) | components, `minus`, `plus`, plus/minus inverse, value equality/hashing | Pure tests for the `GridPos` record. |
+| [LineDirectionTest.java](src/test/java/com/bedrockline/lineplacement/core/LineDirectionTest.java) | `of(axis,sign)` face mapping, sign normalization, `step()`, axis/sign round-trip, zero-sign throws | Pure tests for the reacharound direction mapping. |
 | [LockAxisTest.java](src/test/java/com/bedrockline/lineplacement/core/LockAxisTest.java) | `of(GridPos)` per axis, negatives | Pure tests for `LockAxis` coordinate selection. |
 | [ConfigTest.java](src/test/java/com/bedrockline/lineplacement/ConfigTest.java) | `specBuilds`, `valuePaths`, `specDefaults`, `gettersFallBackToDefaultsBeforeLoad`, `gettersMirrorSpecDefaults` | Asserts the `ModConfigSpec` structure/defaults and that the null-safe getters fall back to documented defaults before load (no `.toml` read). Needs the `unitTest` harness for `ModConfigSpec`. Mirror any default/key change here. |
 
@@ -138,8 +164,8 @@ Tests run via the moddev `unitTest` harness (NeoForge on the test classpath), so
 Defined in `Config`; documented for users in [README.md](README.md). Defaults:
 
 `enableLinePlacement=true`, `enableForBlocksOnly=true`, `requireContinuousUseKey=true`,
-`allowVerticalLocking=true`, `firstPlacementPauseTicks=6`, `resetOnItemChange=true`,
-`resetOnSneak=false`, `debugLogging=false`.
+`allowVerticalLocking=true`, `enableLineReacharound=true`, `firstPlacementPauseTicks=6`,
+`resetOnItemChange=true`, `resetOnSneak=false`, `debugLogging=false`.
 
 ## Build & test
 
@@ -165,8 +191,19 @@ Defined in `Config`; documented for users in [README.md](README.md). Defaults:
 
 - Changing the placement rules means editing **only** `LinePolicy` (logic) +
   `LinePolicyTest` (proof) — the Minecraft layers should not need to know the rules.
+  The reacharound *geometry* (lead/direction/next) is likewise pure in `LinePolicy`; only
+  the world/reach checks and the synthesized `useItemOn` live in `LineLockManager`.
 - The HEAD/RETURN hooks stay in sync via `pendingPlacePos`: it is set only on an
   allowed HEAD pass and consumed/cleared in RETURN/`reset`. Preserve that contract.
+  `tryReacharound` deliberately reuses this path (it calls `useItemOn`, which re-enters the
+  mixin), so it needs no separate record logic — don't duplicate it.
+- **Reacharound cadence:** `reacharoundCooldown` is re-armed on *every* confirmed placement
+  (normal or reacharound) in `postUseItemOn`, which is what keeps reacharound from ever
+  outpacing vanilla held-use. Don't move that re-arm out of the consuming branch.
+- `tryReacharound` is mapping-sensitive: it uses `Minecraft.gameMode` / `Minecraft.hitResult`
+  (public fields), `Player#blockInteractionRange()`, `BlockState#canBeReplaced()`,
+  `Level#isLoaded(BlockPos)`, `Direction#getNormal()`, and the `BlockHitResult(Vec3,Direction,
+  BlockPos,boolean)` ctor — verify these against the decompiled sources before changing.
 - Anything touching `useItemOn`'s name/signature, `BlockPlaceContext`,
   `InteractionResult`, or the NeoForge event/config APIs is mapping/version-sensitive
   — verify against the generated sources before assuming a symbol exists.
