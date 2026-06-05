@@ -162,8 +162,8 @@ and confirm:
 - [ ] Releasing the use key **resets** the line (the next drag can pick a new direction).
 - [ ] Changing the hotbar item **resets** the line (when `resetOnItemChange` is on).
 
-**Line Reacharound**
-- [ ] Build a straight **elevated bridge** while standing on top of the line and walking
+**Line Reacharound** — ✅ verified in-game (2026-06-05)
+- [x] Build a straight **elevated bridge** while standing on top of the line and walking
       forward — blocks place in front of the lead block while you hold right-click.
 - [ ] Verify it **respects normal reach distance** (it stops when the lead block gets too
       far away; it does not extend reach).
@@ -175,10 +175,10 @@ and confirm:
 
 ## Known limitations
 
-> **In-game behaviour still needs hands-on testing.** The project compiles and the
-> line-lock policy is unit-tested, but the live mixin behaviour — including Line
-> Reacharound's world/reach checks and exact placement cadence — should be verified in a
-> running client (see the checklist above).
+> **Line Reacharound is verified in-game** (elevated-bridge build, reach respected). The
+> remaining line-placement edge cases (complex/multi-state blocks, off-hand placement,
+> exact suppression feel) are unit-tested at the policy level and exercised in normal play,
+> but have not each been individually checked — see the checklist above.
 
 - **Complex / multi-state blocks** (slabs, stairs, doors, trapdoors, beds, etc.) are
   placed by vanilla rules. The mod only reasons about the target *position*, not the

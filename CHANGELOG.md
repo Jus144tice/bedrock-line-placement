@@ -5,6 +5,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.2.0] - 2026-06-05
 
+> Verified in-game: building an elevated bridge while walking forward continues the line
+> from the lead block, and vanilla reach is respected.
+
 ### Added
 - **Line Reacharound** (`enableLineReacharound`, default `true`). While a line is
   locked and you are holding the use key, the mod infers the **lead block** (the front
