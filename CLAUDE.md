@@ -140,8 +140,9 @@ Paths are links; the `Symbols` column lists the anchors to grep for.
 
 | File | Purpose |
 |---|---|
-| [neoforge.mods.toml](src/main/resources/META-INF/neoforge.mods.toml) | Mod metadata; declares the mixin config and NeoForge/Minecraft (CLIENT) deps. **`version` here must match `mod_version`.** |
+| [neoforge.mods.toml](src/main/resources/META-INF/neoforge.mods.toml) | Mod metadata; declares the mixin config, the `logoFile`, and NeoForge/Minecraft (CLIENT) deps. **`version` here must match `mod_version`.** |
 | [bedrocklineplacement.mixins.json](src/main/resources/bedrocklineplacement.mixins.json) | Mixin config; lists `MultiPlayerGameModeMixin` under `client`. No refmap (NeoForge runs official mappings). |
+| [bedrocklineplacement.png](src/main/resources/bedrocklineplacement.png) | Mod-list / Modrinth icon (256², referenced by `logoFile` in the toml). Regenerate via `tools/make_icon.py` (Python + Pillow): a row of blocks on a locked line with an emerald lead block + forward chevron — sibling style to bedrock-crafting-controls' grid icon. |
 | [pack.mcmeta](src/main/resources/pack.mcmeta) | Resource pack metadata (`pack_format` 34 for 1.21.1). |
 
 ### Tests

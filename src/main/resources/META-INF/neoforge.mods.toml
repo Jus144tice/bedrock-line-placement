@@ -9,6 +9,7 @@ modId = "bedrocklineplacement"
 version = "1.2.0"
 displayName = "Bedrock Line Placement"
 authors = "Jus144tice"
+logoFile = "bedrocklineplacement.png"
 description = '''
 Client-side quality-of-life mod that recreates Bedrock Edition's straight-line block
 placement in Java Edition. While you hold the use/place key, placements lock to the
